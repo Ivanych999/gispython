@@ -27,7 +27,7 @@ def ParseArgs():
 	ap = argparse.ArgumentParser(description='Reproject rasters and build pyramids')
 	
 	ap.add_argument('--in-folder', '-i', type=str, action='store', required=True, help='Root folder for scaning GeoTIFF files')
-	ap.add_argument('--tmp-folder', '-t', type=str, action='store', required=True, help='Temp folder')
+	ap.add_argument('--tmp-folder', '-t', type=str, action='store', required=False, help='Temp folder')
 	ap.add_argument('--out-folder', '-o', type=str, action='store', required=True, help='CSV file name')
 	ap.add_argument('--epsg', '-e', type=int, action='store', default=3857, required=True, help='Target EPSG')
 	ap.add_argument('--threding-count', '-c', type=int, action='store', default=24, required=True, help='Threading count')
@@ -35,6 +35,8 @@ def ParseArgs():
 	ap.add_argument('--build', '-b', action='store_true', default=False, help='Build pyramids')
 	
 	args = ap.parse_args()
+
+	args_dict = vars(args)
 	
 	return vars(args)
 
@@ -56,22 +58,29 @@ def Reproject(i_rst, o_rst, t_epsg):
 	except Exception,err:
 		return u'Error: %s' % unicode(err)
 
-def SaveStatFirstLine(csv):
+def SaveStatFirstLine(csv, use_temp = True):
 	csvf = open(csv,'w')
-	csvf.write('"src_file";"result";"dst_folder";"dst_file";"reproject_time";"pyramids_time";"moving_time"\n')
+	if use_temp:
+		csvf.write('"src_file";"result";"dst_folder";"dst_file";"reproject_time";"pyramids_time";"moving_time"\n')
+	else:
+		csvf.write('"src_file";"result";"dst_folder";"dst_file";"reproject_time";"pyramids_time"\n')
 	csvf.close()
 
-def SaveStatLine(csv,line):
+def SaveStatLine(csv, line, use_temp = True):
 	global LOCK
 
 	LOCK.acquire()
 	csvf = open(csv,'a')
-	csvf.write('"{0}";"{1}";"{2}";"{3}";"{4}";"{5}";"{6}"\n'.format(line.get('src_file',''),line.get('result',''),line.get('dst_folder',''),line.get('dst_file',''),line.get('reproject_time',''),line.get('pyramids_time',''),line.get('moving_time','')))
+	if use_temp:
+		csvf.write('"{0}";"{1}";"{2}";"{3}";"{4}";"{5}";"{6}"\n'.format(line.get('src_file',''),line.get('result',''),line.get('dst_folder',''),line.get('dst_file',''),line.get('reproject_time',''),line.get('pyramids_time',''),line.get('moving_time','')))
+	else:
+		csvf.write('"{0}";"{1}";"{2}";"{3}";"{4}";"{5}"\n'.format(line.get('src_file',''),line.get('result',''),line.get('dst_folder',''),line.get('dst_file',''),line.get('reproject_time',''),line.get('pyramids_time','')))
 	csvf.close()
 	LOCK.release()
 
 def doWork():
 	global queue
+	global use_temp
 
 	while True:
 		# Try get task from queue
@@ -91,7 +100,9 @@ def doWork():
 
 		AddMessage(0,'Processes with %s' % c_task['in_file'])
 		try:
-			tmp_name = os.path.join(c_task['tmp_folder'],stat_line['dst_file'])
+			tmp_name = os.path.join(c_task['out_folder'],stat_line['dst_file'])
+			if use_temp:
+				tmp_name = os.path.join(c_task['tmp_folder'],stat_line['dst_file'])
 		
 			# Start reproject
 			p_start_time = datetime.datetime.now()
@@ -104,22 +115,24 @@ def doWork():
 				BuildPyramids(tmp_name)
 				stat_line['pyramids_time'] = '%s' % (datetime.datetime.now()-pm_start_time)
 
-			# Start moving results
-			mv_start_time = datetime.datetime.now()
-			out_name = os.path.join(c_task['out_folder'],stat_line['dst_file'])
-			shutil.move(tmp_name,out_name)
-			if c_task['build']:
-				shutil.move(tmp_name+'.ovr',out_name+'.ovr')
-			stat_line['moving_time'] = '%s' % (datetime.datetime.now()-mv_start_time)
+			if use_temp:
+				# Start moving results
+				mv_start_time = datetime.datetime.now()
+				out_name = os.path.join(c_task['out_folder'],stat_line['dst_file'])
+				shutil.move(tmp_name,out_name)
+				if c_task['build']:
+					shutil.move(tmp_name+'.ovr',out_name+'.ovr')
+				stat_line['moving_time'] = '%s' % (datetime.datetime.now()-mv_start_time)
 		except Exception,err:
 			AddMessage(2,'Cannot process file %s' % c_task['in_file'])
 			stat_line['result'] = 'error'
 			stat_line['dst_folder'] = err
 
-		SaveStatLine(c_task['stat_file'],stat_line)
+		SaveStatLine(c_task['stat_file'],stat_line,use_temp)
 
 def main():
 	global queue
+	global use_temp
 
 	# Parsing input args
 	args = ParseArgs()
@@ -136,20 +149,29 @@ def main():
 				AddMessage(2,'Cannot create output folder %s: %s' % (args['out_folder'],err))
 				return
 
+		# Set use temp
+
+		use_temp = False
+		if args.get('tmp_folder',None):
+			use_temp = True
+
 		# Check temp folder
-		if not os.path.exists(args['tmp_folder']):
-			try:
-				os.mkdir(args['tmp_folder'])
-				AddMessage(0,'Folder %s created' % args['tmp_folder'])
-			except Exception,err:
-				AddMessage(2,'Cannot create temp folder %s: %s' % (args['tmp_folder'],err))
-				return
+		if use_temp:
+			if not os.path.exists(args['tmp_folder']):
+				try:
+					os.mkdir(args['tmp_folder'])
+					AddMessage(0,'Folder %s created' % args['tmp_folder'])
+				except Exception,err:
+					AddMessage(2,'Cannot create temp folder %s: %s' % (args['tmp_folder'],err))
+					return
 
 		AddMessage(0,'Start scan %s' % args['in_folder'])
 
 		# Create statistic file
-		csv = os.path.join(args['tmp_folder'],'statistic.csv')
-		SaveStatFirstLine(csv)
+		csv = os.path.join(args['out_folder'],'statistic.csv')
+		if use_temp:
+			csv = os.path.join(args['tmp_folder'],'statistic.csv')
+		SaveStatFirstLine(csv,use_temp)
 
 		# Start scan folders tree and making queue
 		for root,dir,files in os.walk(args['in_folder']):
@@ -159,7 +181,7 @@ def main():
 
 					f_task = {}
 					f_task['in_file'] = os.path.join(root,f)
-					f_task['tmp_folder'] = args['tmp_folder']
+					f_task['tmp_folder'] =  args.get('tmp_folder',None)
 					f_task['build'] = args['build']
 					f_task['stat_file'] = csv
 					f_task['epsg'] = args['epsg']
