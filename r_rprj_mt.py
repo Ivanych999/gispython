@@ -61,9 +61,9 @@ def Reproject(i_rst, o_rst, t_epsg):
 def SaveStatFirstLine(csv, use_temp = True):
 	csvf = open(csv,'w')
 	if use_temp:
-		csvf.write('"src_file";"result";"dst_folder";"dst_file";"reproject_time";"pyramids_time";"moving_time"\n')
+		csvf.write('"src_file";"result";"dst_folder";"dst_file";"dst_file_size";"reproject_time";"pyramids_time";"pyramids_size";"moving_time"\n')
 	else:
-		csvf.write('"src_file";"result";"dst_folder";"dst_file";"reproject_time";"pyramids_time"\n')
+		csvf.write('"src_file";"result";"dst_folder";"dst_file";"dst_file_size";"reproject_time";"pyramids_time";"pyramids_size"\n')
 	csvf.close()
 
 def SaveStatLine(csv, line, use_temp = True):
@@ -72,9 +72,9 @@ def SaveStatLine(csv, line, use_temp = True):
 	LOCK.acquire()
 	csvf = open(csv,'a')
 	if use_temp:
-		csvf.write('"{0}";"{1}";"{2}";"{3}";"{4}";"{5}";"{6}"\n'.format(line.get('src_file',''),line.get('result',''),line.get('dst_folder',''),line.get('dst_file',''),line.get('reproject_time',''),line.get('pyramids_time',''),line.get('moving_time','')))
+		csvf.write('"{0}";"{1}";"{2}";"{3}";{4};"{5}";"{6}";{7};"{8}"\n'.format(line.get('src_file',''),line.get('result',''),line.get('dst_folder',''),line.get('dst_file',''),line.get('dst_file_size',0),line.get('reproject_time',''),line.get('pyramids_time',''),line.get('pyramids_size',0),line.get('moving_time','')))
 	else:
-		csvf.write('"{0}";"{1}";"{2}";"{3}";"{4}";"{5}"\n'.format(line.get('src_file',''),line.get('result',''),line.get('dst_folder',''),line.get('dst_file',''),line.get('reproject_time',''),line.get('pyramids_time','')))
+		csvf.write('"{0}";"{1}";"{2}";"{3}";{4};"{5}";"{6}";{7}\n'.format(line.get('src_file',''),line.get('result',''),line.get('dst_folder',''),line.get('dst_file',''),line.get('dst_file_size',0),line.get('reproject_time',''),line.get('pyramids_time',''),line.get('pyramids_size',0)))
 	csvf.close()
 	LOCK.release()
 
@@ -107,12 +107,14 @@ def doWork():
 			# Start reproject
 			p_start_time = datetime.datetime.now()
 			Reproject(c_task['in_file'],tmp_name,c_task['epsg'])
+			stat_line['dst_file_size'] = os.path.getsize(tmp_name)
 			stat_line['reproject_time'] = '%s' % (datetime.datetime.now()-p_start_time)
 
 			if c_task['build']:
 				# Start build pyramids
 				pm_start_time = datetime.datetime.now()
 				BuildPyramids(tmp_name)
+				stat_line['pyramids_size'] = os.path.getsize(tmp_name+'.ovr')
 				stat_line['pyramids_time'] = '%s' % (datetime.datetime.now()-pm_start_time)
 
 			if use_temp:
