@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 __author__ = 'medvedev.ivan@mail.ru'
 
-import httplib, urllib, json
+import httplib, urllib, math
 
 RADIUSES = {
 	4326: 6378137,
@@ -20,8 +20,12 @@ class Point:
 		self.y = y
 		self.epsg = epsg
 
-	def ToString(self):
-		return {"x": self.x, "y": self.y, "epsg": self.epsg}
+	def ToDict(self):
+		return {
+			"x": self.x, 
+			"y": self.y, 
+			"epsg": self.epsg
+			}
 
 class Rectangle:
 	epsg = 3857
@@ -29,12 +33,18 @@ class Rectangle:
 	bottom_right = Point(0,0,epsg)
 	
 	def __init__(self,xmin,ymin,xmax,ymax,epsg=3857):
-		self.top_left = Point(xmin,ymax)
-		self.bottom_right = Point(xmax,ymin)
+		self.top_left = Point(xmin,ymax,epsg)
+		self.bottom_right = Point(xmax,ymin,epsg)
 		self.epsg = epsg
 
-	def ToString(self):
-		return {"xmin": self.top_left.x, "ymin": self.bottom_right.y, "xmax": self.bottom_right.x, "ymax": self.top_left.y, "epsg": self.epsg}
+	def ToDict(self):
+		return {
+			"xmin": self.top_left.x, 
+			"ymin": self.bottom_right.y, 
+			"xmax": self.bottom_right.x, 
+			"ymax": self.top_left.y, 
+			"epsg": self.epsg
+			}
 
 class Size:
 	height = 0
@@ -44,8 +54,34 @@ class Size:
 		self.height = height
 		self.width = width
 
-	def ToString(self):
-		return {"height": self.height, "width": self.width}
+	def ToDict(self):
+		return {
+			"height": self.height, 
+			"width": self.width
+			}
+
+class ZoomLevel:
+	pixel_size = 0.0
+	scale = 0.0
+	level_num = 0
+	level_name = '0'
+	tiles = Size(1,1)
+
+	def __init__(self,pixel_size,scale,level_num,level_name,tiles):
+		self.pixel_size = pixel_size
+		self.scale = scale
+		self.level_num = level_num
+		self.level_name = level_name
+		self.tiles = tiles
+
+	def ToDict(self):
+		return {
+			"pixel_size": self.pixel_size,
+			"scale": self.scale,
+			"level_num": self.level_num,
+			"level_name": self.level_name,
+			"tiles": self.tiles.ToDict()
+			}
 
 class TileSchema:
 	name = ''
@@ -56,12 +92,55 @@ class TileSchema:
 
 	def __init__(self,name,xmin,ymin,xmax,ymax,tile_width,tile_height,epsg):
 		self.name=name
-		self.extent(xmin,ymin,xmax,ymax,epsg)
+		self.extent = Rectangle(xmin,ymin,xmax,ymax,epsg)
 		self.tile_size = Size(tile_width,tile_height)
 		self.epsg_code = epsg
 
 	def AddLevelByScale(self,level):
-		pass  
-
-	def GetTileRectange(self,level,tile_col,tile_row):
+		#px_size_width =  
 		pass
+
+	def GetTileRectangeByIndex(self,level,tile_col,tile_row):
+		result = Rectangle(0,0,0,0,self.epsg_code)
+		if len(self.scales.keys()) > 0 and self.scales.has_key(level):
+			tile_width = (self.extent.bottom_right.x-self.extent.top_left.x)/self.scales[level]['tiles']['width']
+			tile_height = (self.extent.top_left.y-self.extent.bottom_right.y)/self.scales[level]['tiles']['height']
+			result.top_left = Point(self.extent.top_left.x+tile_width*tile_col,self.extent.top_left.y-tile_height*tile_row,self.epsg_code)
+			result.bottom_right = Point(result.top_left.x+tile_width,result.top_left.y-tile_height,self.epsg_code)
+		return result
+
+	def GetTileRectangeByBBox(self,level,bbox):
+		result = Rectangle(0,0,0,0)
+		if len(self.scales.keys()) > 0 and self.scales.has_key(level):
+			tile_width = (self.extent.bottom_right.x-self.extent.top_left.x)/self.scales[level]['tiles']['width']
+			tile_height = (self.extent.top_left.y-self.extent.bottom_right.y)/self.scales[level]['tiles']['height']
+			result.top_left = Point(int(math.floor((bbox.top_left.x - self.extent.top_left.x)/tile_width)),self.scales[level]['tiles']['height'] - int(math.floor((bbox.top_left.y - self.extent.bottom_right.y)/tile_height)))
+			result.bottom_right = Point(int(math.floor((bbox.bottom_right.x - self.extent.top_left.x)/tile_width)),self.scales[level]['tiles']['height'] - int(math.floor((bbox.bottom_right.y - self.extent.bottom_right.y)/tile_height)))
+		return result
+
+	def AddLevel(self,pixel_size,scale,level_num,tiles_columns,tiles_rows):
+		self.scales[level_num] = ZoomLevel(pixel_size,scale,level_num,'%s:%s' % (self.name,level_num), Size(tiles_columns,tiles_rows)).ToDict()
+
+	def ToDict(self):
+		return {
+			"name": self.name,
+			"extent": self.extent.ToDict(),
+			"tile_size": self.tile_size.ToDict(),
+			"epsg_code": self.epsg_code,
+			"scales": self.scales
+			}
+
+#class TileStorage:
+#	name = ''
+#	tile_schema
+#	base_folder
+#	url_template
+
+#	def __init__(self,name,tile_schema):
+#		self.name = name
+#		self.tile_schema = tile_schema
+
+ts = TileSchema('1',-20037508.34,-20037508.34,20037508.34,20037508.34,256,256,3857)
+ts.AddLevel(19567.87923828125,69885282.99386162,3,8,8)
+print ts.GetTileRectangeByIndex(3,2,3).ToDict()
+print ts.GetTileRectangeByBBox(3,Rectangle(-10018754.17,9.313225746154785e-10,-5009377.085,5009377.085000001)).ToDict()
